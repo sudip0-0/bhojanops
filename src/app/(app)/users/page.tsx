@@ -8,10 +8,18 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Badge } from "@/components/ui/badge";
 import { createUser, toggleUser } from "./actions";
 
-export default async function UsersPage() {
+export default async function UsersPage({ searchParams }: { searchParams: Promise<{ q?: string }> }) {
   await requirePermission("users.manage");
+  const { q } = await searchParams;
+  const userWhere: Record<string, unknown> = {};
+  if (q) {
+    userWhere.OR = [
+      { name: { contains: q, mode: "insensitive" } },
+      { email: { contains: q, mode: "insensitive" } },
+    ];
+  }
   const [users, roles, branches] = await Promise.all([
-    prisma.user.findMany({ orderBy: { name: "asc" }, include: { role: true, branch: true } }),
+    prisma.user.findMany({ where: userWhere, orderBy: { name: "asc" }, include: { role: true, branch: true } }),
     prisma.role.findMany({ orderBy: { name: "asc" } }),
     prisma.branch.findMany({ orderBy: { name: "asc" } }),
   ]);
@@ -19,6 +27,13 @@ export default async function UsersPage() {
   return (
     <div className="space-y-4">
       <h1 className="text-2xl font-bold">Users</h1>
+      <form className="flex items-end gap-2">
+        <label className="text-xs">
+          Search
+          <Input name="q" defaultValue={q} placeholder="Name or email..." className="ml-1 h-8 w-56" />
+        </label>
+        <Button type="submit" size="sm" variant="outline">Search</Button>
+      </form>
       <Card>
         <CardHeader><CardTitle>Staff</CardTitle></CardHeader>
         <CardContent className="space-y-2">

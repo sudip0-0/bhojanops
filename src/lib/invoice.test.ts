@@ -18,6 +18,18 @@ describe("nepaliFiscalYear", () => {
   it("March belongs to previous FY", () => {
     expect(nepaliFiscalYear(new Date("2025-03-01"))).toBe("2081-82");
   });
+  it("July 10 (before 16) is still previous FY", () => {
+    expect(nepaliFiscalYear(new Date("2025-07-10"))).toBe("2081-82");
+  });
+  it("July 16 (boundary) starts the new FY", () => {
+    expect(nepaliFiscalYear(new Date("2025-07-16"))).toBe("2082-83");
+  });
+  it("July 17 (after boundary) is new FY", () => {
+    expect(nepaliFiscalYear(new Date("2025-07-17"))).toBe("2082-83");
+  });
+  it("July 15 (day before boundary) is previous FY", () => {
+    expect(nepaliFiscalYear(new Date("2025-07-15"))).toBe("2081-82");
+  });
 });
 
 describe("formatNPR", () => {

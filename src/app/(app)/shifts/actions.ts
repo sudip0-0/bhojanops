@@ -4,6 +4,8 @@ import { z } from "zod";
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { authorize } from "@/lib/auth-helpers";
+import { assertSameBranch } from "@/lib/scope";
+import { can } from "@/lib/rbac/can";
 import { writeAudit } from "@/lib/audit";
 import { expectedCash, variance, isLargeVariance } from "@/lib/shift";
 
@@ -18,6 +20,7 @@ export async function openShift(formData: FormData) {
   const existing = await prisma.shift.findFirst({ where: { cashierId: user.id, status: "OPEN" } });
   if (existing) throw new Error("You already have an open shift.");
   const branchId = await resolveBranchId(user.branchId);
+  await assertSameBranch(user, branchId);
   const shift = await prisma.shift.create({ data: { branchId, cashierId: user.id, openingCash, status: "OPEN" } });
   await writeAudit({ userId: user.id, branchId, action: "shift.open", entity: "Shift", entityId: shift.id, meta: { openingCash } });
   revalidatePath("/shifts");
@@ -29,6 +32,11 @@ export async function closeShift(formData: FormData) {
     .object({ shiftId: z.string(), countedCash: z.coerce.number().min(0), reason: z.string().optional() })
     .parse(Object.fromEntries(formData));
   const shift = await prisma.shift.findUniqueOrThrow({ where: { id: shiftId }, include: { bills: { include: { payments: true, refunds: true } } } });
+  await assertSameBranch(user, shift.branchId);
+  // Only the cashier who opened the shift, or a manager who can approve variance, may close it.
+  if (shift.cashierId !== user.id && !can(user.permissions, "shift.approve")) {
+    throw new Error("FORBIDDEN_SHIFT");
+  }
   if (shift.status === "CLOSED") return;
 
   const cashPayments = shift.bills.flatMap((b) => b.payments).filter((p) => p.method === "CASH").reduce((s, p) => s + p.amount, 0);

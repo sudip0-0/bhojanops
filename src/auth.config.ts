@@ -1,7 +1,7 @@
 import type { NextAuthConfig } from "next-auth";
 
 // Public paths that do not require authentication.
-const PUBLIC = ["/", "/login", "/access-denied", "/setup"];
+const PUBLIC = ["/", "/login", "/access-denied", "/setup", "/forgot-password", "/reset-password"];
 
 export const authConfig = {
   pages: { signIn: "/login" },

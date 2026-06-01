@@ -14,7 +14,12 @@ export default async function InventoryPage() {
   const where = user.branchId ? { branchId: user.branchId } : {};
   const [items, movements, menuItems] = await Promise.all([
     prisma.stockItem.findMany({ where, orderBy: { name: "asc" } }),
-    prisma.stockMovement.findMany({ orderBy: { createdAt: "desc" }, take: 15, include: { stockItem: true } }),
+    prisma.stockMovement.findMany({
+      where: { stockItem: where },
+      orderBy: { createdAt: "desc" },
+      take: 15,
+      include: { stockItem: true },
+    }),
     prisma.menuItem.findMany({ where: { archived: false }, orderBy: { name: "asc" }, select: { id: true, name: true } }),
   ]);
   const low = items.filter(isLowStock);

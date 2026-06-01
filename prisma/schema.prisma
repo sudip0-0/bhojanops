@@ -132,7 +132,21 @@ model User {
   bills        Bill[]
   shifts       Shift[]
   auditLogs    AuditLog[]
+  resetTokens  PasswordResetToken[]
   createdAt    DateTime    @default(now())
+}
+
+model PasswordResetToken {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String   @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([expiresAt])
 }
 
 // ---------- Restaurant setup ----------
@@ -168,6 +182,7 @@ model Branch {
   bills         Bill[]
   shifts        Shift[]
   invoiceSeqs   InvoiceSequence[]
+  orderSeq      OrderSequence?
   stockItems    StockItem[]
   purchases     Purchase[]
 }
@@ -271,6 +286,18 @@ model Order {
   tickets    KitchenTicket[]
   bill       Bill?
   createdAt  DateTime    @default(now())
+
+  @@unique([branchId, number])
+}
+
+/// Atomically allocates the next per-branch order number (P0-2).
+/// Mirrored on InvoiceSequence so the same upsert-then-increment
+/// pattern is used to close the read-then-create race.
+model OrderSequence {
+  id         String @id @default(cuid())
+  branchId   String @unique
+  branch     Branch @relation(fields: [branchId], references: [id])
+  lastNumber Int    @default(0)
 }
 
 model OrderItem {

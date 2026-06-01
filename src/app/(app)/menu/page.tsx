@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { requirePermission } from "@/lib/auth-helpers";
 import { prisma } from "@/lib/prisma";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -6,20 +7,45 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { formatNPR } from "@/lib/nepal";
 import { createCategory, createItem, updateItem, addVariant, addModifier, bulkAvailability } from "./actions";
+import { cn } from "@/lib/utils";
 
-export default async function MenuPage({ searchParams }: { searchParams: Promise<{ q?: string }> }) {
+export default async function MenuPage({ searchParams }: { searchParams: Promise<{ q?: string; cat?: string; avail?: string }> }) {
   await requirePermission("menu.manage");
-  const { q } = await searchParams;
+  const { q, cat, avail } = await searchParams;
+  const availableOnly = avail === "1";
+
+  const itemWhere: Record<string, unknown> = {};
+  if (q) itemWhere.name = { contains: q, mode: "insensitive" };
+  if (availableOnly) itemWhere.available = true;
+
   const categories = await prisma.menuCategory.findMany({
     orderBy: { sort: "asc" },
     include: {
       items: {
-        where: q ? { name: { contains: q, mode: "insensitive" } } : undefined,
+        where: {
+          ...itemWhere,
+          ...(cat && cat !== "all" ? {} : {}),
+        },
         orderBy: { name: "asc" },
         include: { variants: true, modifiers: { include: { modifiers: true } } },
       },
     },
   });
+
+  // When a category chip is selected, only show that category.
+  const visibleCategories = cat && cat !== "all" ? categories.filter((c) => c.id === cat) : categories;
+
+  const buildHref = (next: { cat?: string | null; avail?: boolean | null; q?: string | null }) => {
+    const u = new URLSearchParams();
+    const nextQ = next.q !== undefined ? next.q : q;
+    const nextCat = next.cat !== undefined ? next.cat : cat;
+    const nextAvail = next.avail !== undefined ? next.avail : availableOnly;
+    if (nextQ) u.set("q", nextQ);
+    if (nextCat) u.set("cat", nextCat);
+    if (nextAvail) u.set("avail", "1");
+    const qs = u.toString();
+    return qs ? `/menu?${qs}` : "/menu";
+  };
 
   return (
     <div className="space-y-6">
@@ -27,8 +53,44 @@ export default async function MenuPage({ searchParams }: { searchParams: Promise
         <h1 className="text-2xl font-bold">Menu</h1>
         <form className="flex gap-2">
           <Input name="q" defaultValue={q} placeholder="Search items..." className="w-56" />
+          {cat && <input type="hidden" name="cat" value={cat} />}
+          {availableOnly && <input type="hidden" name="avail" value="1" />}
           <Button type="submit" variant="outline" size="sm">Search</Button>
         </form>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2">
+        <Link
+          href={buildHref({ cat: "all" })}
+          className={cn(
+            "rounded-full border px-3 py-1 text-xs",
+            (!cat || cat === "all") ? "border-primary bg-primary text-primary-foreground" : "bg-muted/40 hover:bg-muted",
+          )}
+        >
+          All
+        </Link>
+        {categories.map((c) => (
+          <Link
+            key={c.id}
+            href={buildHref({ cat: c.id })}
+            className={cn(
+              "rounded-full border px-3 py-1 text-xs",
+              cat === c.id ? "border-primary bg-primary text-primary-foreground" : "bg-muted/40 hover:bg-muted",
+            )}
+          >
+            {c.name}
+          </Link>
+        ))}
+        <Link
+          href={buildHref({ avail: !availableOnly })}
+          aria-pressed={availableOnly}
+          className={cn(
+            "ml-auto rounded-full border px-3 py-1 text-xs",
+            availableOnly ? "border-primary bg-primary text-primary-foreground" : "bg-muted/40 hover:bg-muted",
+          )}
+        >
+          {availableOnly ? "Showing available only" : "Show available only"}
+        </Link>
       </div>
 
       <div className="flex flex-wrap gap-2">
@@ -38,7 +100,10 @@ export default async function MenuPage({ searchParams }: { searchParams: Promise
         </form>
       </div>
 
-      {categories.map((cat) => (
+      {visibleCategories.length === 0 && (
+        <p className="text-sm text-muted-foreground">No categories match.</p>
+      )}
+      {visibleCategories.map((cat) => (
         <Card key={cat.id}>
           <CardHeader className="flex-row items-center justify-between space-y-0">
             <CardTitle>{cat.name}</CardTitle>

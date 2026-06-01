@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Field } from "@/components/ui/field";
 import { toast } from "@/components/ui/toaster";
 
 type Restaurant = {
@@ -16,12 +17,11 @@ type Restaurant = {
 };
 type Branch = { id: string; name: string; invoicePrefix: string; address: string; phone: string };
 
-function Field({ label, name, defaultValue, type = "text" }: { label: string; name: string; defaultValue?: string | number; type?: string }) {
+function TextField({ label, name, defaultValue, type = "text" }: { label: string; name: string; defaultValue?: string | number; type?: string }) {
   return (
-    <div className="space-y-1">
-      <Label htmlFor={name}>{label}</Label>
+    <Field label={label} htmlFor={name}>
       <Input id={name} name={name} type={type} defaultValue={defaultValue} />
-    </div>
+    </Field>
   );
 }
 
@@ -37,18 +37,18 @@ export function SettingsForms({ restaurant, branches }: { restaurant: Restaurant
         <CardContent>
           <form action={rAction} className="space-y-3">
             <input type="hidden" name="id" value={restaurant.id} />
-            <Field label="Legal Name" name="legalName" defaultValue={restaurant.legalName} />
-            <Field label="Display Name" name="displayName" defaultValue={restaurant.displayName} />
-            <Field label="Address" name="address" defaultValue={restaurant.address} />
-            <Field label="Phone" name="phone" defaultValue={restaurant.phone} />
-            <Field label="PAN/VAT Number" name="panVat" defaultValue={restaurant.panVat} />
+            <TextField label="Legal Name" name="legalName" defaultValue={restaurant.legalName} />
+            <TextField label="Display Name" name="displayName" defaultValue={restaurant.displayName} />
+            <TextField label="Address" name="address" defaultValue={restaurant.address} />
+            <TextField label="Phone" name="phone" defaultValue={restaurant.phone} />
+            <TextField label="PAN/VAT Number" name="panVat" defaultValue={restaurant.panVat} />
             <div className="grid grid-cols-3 gap-2">
-              <Field label="VAT %" name="vatRate" type="number" defaultValue={restaurant.vatRate} />
-              <Field label="Service %" name="serviceCharge" type="number" defaultValue={restaurant.serviceCharge} />
-              <Field label="Packaging Rs" name="packaging" type="number" defaultValue={restaurant.packaging} />
+              <TextField label="VAT %" name="vatRate" type="number" defaultValue={restaurant.vatRate} />
+              <TextField label="Service %" name="serviceCharge" type="number" defaultValue={restaurant.serviceCharge} />
+              <TextField label="Packaging Rs" name="packaging" type="number" defaultValue={restaurant.packaging} />
             </div>
-            <Field label="Max discount % (without approval)" name="maxDiscountPct" type="number" defaultValue={restaurant.maxDiscountPct} />
-            <Field label="Receipt Footer" name="receiptFooter" defaultValue={restaurant.receiptFooter} />
+            <TextField label="Max discount % (without approval)" name="maxDiscountPct" type="number" defaultValue={restaurant.maxDiscountPct} />
+            <TextField label="Receipt Footer" name="receiptFooter" defaultValue={restaurant.receiptFooter} />
             <div className="space-y-1">
               <Label htmlFor="receiptMode">Receipt Mode</Label>
               <Select name="receiptMode" defaultValue={restaurant.receiptMode}>
@@ -65,7 +65,7 @@ export function SettingsForms({ restaurant, branches }: { restaurant: Restaurant
       </Card>
 
       <div className="space-y-6">
-        <Card>
+        <Card id="branches">
           <CardHeader><CardTitle>Branches</CardTitle></CardHeader>
           <CardContent className="space-y-2">
             {branches.map((b) => (
@@ -81,10 +81,10 @@ export function SettingsForms({ restaurant, branches }: { restaurant: Restaurant
           <CardContent>
             <form action={bAction} className="space-y-3">
               <input type="hidden" name="restaurantId" value={restaurant.id} />
-              <Field label="Name" name="name" />
-              <Field label="Address" name="address" />
-              <Field label="Phone" name="phone" />
-              <Field label="Invoice Prefix" name="invoicePrefix" />
+              <TextField label="Name" name="name" />
+              <TextField label="Address" name="address" />
+              <TextField label="Phone" name="phone" />
+              <TextField label="Invoice Prefix" name="invoicePrefix" />
               <Button type="submit" disabled={bPending}>{bPending ? "Adding..." : "Add branch"}</Button>
             </form>
           </CardContent>

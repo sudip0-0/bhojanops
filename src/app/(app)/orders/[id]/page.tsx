@@ -7,31 +7,54 @@ import { Button } from "@/components/ui/button";
 import { ConfirmButton } from "@/components/confirm-button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { PrintButton } from "@/components/print-button";
+import { MenuItemPicker, type PickerCategory } from "@/components/menu-item-picker";
 import { formatNPR } from "@/lib/nepal";
 import { orderSubtotal } from "@/lib/order";
 import { addLine, removeOrderItem, sendToKitchen, requestVoid, setGuests } from "../actions";
+import { KotAutoPrint } from "@/components/kot-auto-print";
 
-const STATE_COLOR: Record<string, string> = {
-  DRAFT: "bg-gray-100 text-gray-700", SENT: "bg-blue-100 text-blue-800",
-  PREPARING: "bg-amber-100 text-amber-800", READY: "bg-green-100 text-green-800",
-  SERVED: "bg-emerald-100 text-emerald-800", VOIDED: "bg-red-100 text-red-700",
+const STATE_VARIANT: Record<string, "neutral" | "info" | "warning" | "success" | "danger"> = {
+  DRAFT: "neutral", SENT: "info", PREPARING: "warning",
+  READY: "success", SERVED: "success", VOIDED: "danger",
 };
 
-export default async function OrderPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function OrderPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ sent?: string }> }) {
   const user = await requirePermission("order.create");
   const { id } = await params;
+  const { sent } = await searchParams;
   const order = await prisma.order.findUnique({
     where: { id },
     include: { items: { orderBy: { createdAt: "asc" }, include: { voidRequests: true } }, table: true },
   });
   if (!order) notFound();
 
-  const categories = await prisma.menuCategory.findMany({
+  const categoriesRaw = await prisma.menuCategory.findMany({
     orderBy: { sort: "asc" },
-    include: { items: { where: { available: true, archived: false }, orderBy: { name: "asc" }, include: { variants: true } } },
+    include: {
+      items: {
+        where: { available: true, archived: false },
+        orderBy: { name: "asc" },
+        include: { variants: true, modifiers: { include: { modifiers: true } } },
+      },
+    },
   });
+  const categories: PickerCategory[] = categoriesRaw.map((c) => ({
+    id: c.id,
+    name: c.name,
+    items: c.items.map((mi) => ({
+      id: mi.id,
+      name: mi.name,
+      nepaliName: mi.nepaliName,
+      price: mi.price,
+      variants: mi.variants.map((v) => ({ id: v.id, name: v.name, priceDelta: v.priceDelta })),
+      modifierGroups: mi.modifiers.map((g) => ({
+        id: g.id,
+        name: g.name,
+        modifiers: g.modifiers.map((m) => ({ id: m.id, name: m.name, price: m.price })),
+      })),
+    })),
+  }));
 
   const subtotal = orderSubtotal(order.items.map((i) => ({ unitPrice: i.unitPrice, qty: i.qty, state: i.state })));
   const canBill = order.items.some((i) => i.state !== "VOIDED" && i.state !== "DRAFT");
@@ -71,7 +94,7 @@ export default async function OrderPage({ params }: { params: Promise<{ id: stri
                 <div key={it.id} className="flex items-center justify-between rounded border p-2 text-sm">
                   <div>
                     <span className="font-medium">{it.qty}× {it.nameSnapshot}</span>
-                    <Badge className={`ml-2 ${STATE_COLOR[it.state]}`}>{it.state.toLowerCase()}</Badge>
+                    <Badge className="ml-2" variant={STATE_VARIANT[it.state] ?? "neutral"}>{it.state.toLowerCase()}</Badge>
                     {it.notes && <p className="text-xs text-muted-foreground">Note: {it.notes}</p>}
                   </div>
                   <div className="flex items-center gap-2">
@@ -100,35 +123,22 @@ export default async function OrderPage({ params }: { params: Promise<{ id: stri
         <Card>
           <CardHeader><CardTitle>Add Item</CardTitle></CardHeader>
           <CardContent>
-            <form action={addLine} className="space-y-2">
+            <form id="menu-picker-form" action={addLine} className="space-y-2">
               <input type="hidden" name="orderId" value={order.id} />
-              <Select name="selection" required>
-                <SelectTrigger aria-label="Select menu item"><SelectValue placeholder="Select an item" /></SelectTrigger>
-                <SelectContent>
-                  {categories.map((cat) => (
-                    <SelectGroup key={cat.id}>
-                      <SelectLabel>{cat.name}</SelectLabel>
-                      {cat.items.flatMap((mi) =>
-                        mi.variants.length > 0
-                          ? mi.variants.map((v) => (
-                              <SelectItem key={v.id} value={`${mi.id}|${v.id}`}>{mi.name} - {v.name} ({formatNPR(mi.price + v.priceDelta)})</SelectItem>
-                            ))
-                          : [<SelectItem key={mi.id} value={`${mi.id}|`}>{mi.name} ({formatNPR(mi.price)})</SelectItem>]
-                      )}
-                    </SelectGroup>
-                  ))}
-                </SelectContent>
-              </Select>
+              <MenuItemPicker categories={categories} />
               <div className="flex gap-2">
                 <Input name="qty" type="number" defaultValue={1} className="w-20" />
                 <Input name="notes" placeholder="Kitchen note (optional)" />
               </div>
-              <Button type="submit" className="w-full">Add to order</Button>
+              <Button type="submit" className="w-full" data-picker-submit>Add to order</Button>
             </form>
             <p className="mt-2 text-xs text-muted-foreground">Waiter: {user.name}</p>
           </CardContent>
         </Card>
       </div>
+
+      {/* Auto-print KOT when navigated with ?sent=1 */}
+      <KotAutoPrint />
 
       {/* Print-only Kitchen Order Ticket */}
       <div className="receipt-print mx-auto hidden w-[80mm] bg-white p-3 font-mono text-[12px] leading-tight text-black print:block">

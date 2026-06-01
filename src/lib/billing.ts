@@ -68,3 +68,43 @@ export function computeBill(input: BillInput): BillTotals {
 
   return { subtotal, discountAmt, afterDiscount, serviceCharge, packaging, base, vat, net, roundOff, grandTotal };
 }
+
+export type PaymentMethod = "CASH" | "FONEPAY" | "ESEWA" | "KHALTI" | "BANK" | "CARD" | "CREDIT";
+export type PaymentRow = { method: PaymentMethod; amount: number; reference?: string };
+
+export type TrimResult =
+  | { ok: true; payments: PaymentRow[]; paid: number; overpay: number }
+  | { ok: false; overpay: number };
+
+/**
+ * Trim overpay from any payment method, in submission order. The previous
+ * implementation only trimmed CASH, which silently kept Fonepay overpays
+ * as recorded revenue (P0-5). When the customer genuinely overpays and
+ * no method has enough room to absorb the change, we return ok:false so
+ * the caller can reject the bill.
+ */
+export function trimOverpay(payments: PaymentRow[], grandTotal: number): TrimResult {
+  const r2 = (n: number) => Math.round(n * 100) / 100;
+  const total = r2(payments.reduce((s, p) => s + p.amount, 0));
+  let overpay = r2(total - grandTotal);
+  if (overpay <= 0) {
+    const normalized = payments.map((p) => ({
+      method: p.method,
+      amount: r2(p.amount),
+      ...(p.reference ? { reference: p.reference } : {}),
+    }));
+    return { ok: true, payments: normalized, paid: total, overpay: 0 };
+  }
+  const next: PaymentRow[] = payments.map((p) => ({ ...p, amount: r2(p.amount) }));
+  for (const p of next) {
+    if (overpay > 0 && p.amount > 0) {
+      const d = Math.min(p.amount, overpay);
+      p.amount = r2(p.amount - d);
+      overpay = r2(overpay - d);
+    }
+  }
+  const kept = next.filter((p) => p.amount > 0);
+  const paid = r2(kept.reduce((s, p) => s + p.amount, 0));
+  if (paid > grandTotal) return { ok: false, overpay: r2(paid - grandTotal) };
+  return { ok: true, payments: kept, paid, overpay: 0 };
+}

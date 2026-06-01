@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { useActionState, useEffect } from "react";
-import { computeBill } from "@/lib/billing";
+import { computeBill, trimOverpay, type PaymentMethod } from "@/lib/billing";
 import { formatNPR } from "@/lib/nepal";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -11,8 +11,8 @@ import { toast } from "@/components/ui/toaster";
 import { finalizeBill } from "@/app/(app)/billing/actions";
 
 type Line = { name: string; unitPrice: number; qty: number; taxable?: boolean };
-type Payment = { method: string; amount: number; reference: string };
-const METHODS = ["CASH", "FONEPAY", "ESEWA", "KHALTI", "BANK", "CARD", "CREDIT"];
+type Payment = { method: PaymentMethod; amount: number; reference?: string };
+const METHODS: PaymentMethod[] = ["CASH", "FONEPAY", "ESEWA", "KHALTI", "BANK", "CARD", "CREDIT"];
 
 export function BillSettle({
   orderId, lines, serviceChargePct, packaging, vatRate, canDiscount,
@@ -32,11 +32,38 @@ export function BillSettle({
     [lines, discountType, discountValue, serviceChargePct, packaging, vatRate]
   );
 
-  const paid = payments.reduce((s, p) => s + (Number(p.amount) || 0), 0);
+  // Use the same trimOverpay helper the server action uses, so the UI's
+  // "would this overpay?" check stays in lock-step with the action.
+  const trimmed = useMemo(
+    () => trimOverpay(
+      payments.map((p) => ({ method: p.method, amount: Number(p.amount) || 0 })),
+      totals.grandTotal,
+    ),
+    [payments, totals.grandTotal],
+  );
+  // trimOverpay returns { ok:false } only in a defensive case; fall back to
+  // the raw overpay so the UI still warns correctly.
+  const paid = trimmed.ok ? trimmed.paid : totals.grandTotal;
+  const overpay = Math.max(0, paid - totals.grandTotal);
   const balance = Math.round((totals.grandTotal - paid) * 100) / 100;
 
   const setPayment = (i: number, patch: Partial<Payment>) =>
     setPayments((ps) => ps.map((p, idx) => (idx === i ? { ...p, ...patch } : p)));
+
+  const fillExactCash = () => setPayment(0, { amount: totals.grandTotal });
+
+  const trimToExact = () => {
+    // Walk payments in order, reduce each by the overpay until zero.
+    let remaining = overpay;
+    setPayments((ps) =>
+      ps.map((p) => {
+        if (remaining <= 0) return p;
+        const d = Math.min(Number(p.amount) || 0, remaining);
+        remaining = Math.round((remaining - d) * 100) / 100;
+        return { ...p, amount: Math.max(0, Math.round(((Number(p.amount) || 0) - d) * 100) / 100) };
+      }),
+    );
+  };
 
   return (
     <form action={formAction} className="space-y-4">
@@ -77,27 +104,49 @@ export function BillSettle({
         <p className="text-sm font-medium">Payments (split supported)</p>
         {payments.map((p, i) => (
           <div key={i} className="flex items-center gap-2">
-            <Select value={p.method} onValueChange={(v) => setPayment(i, { method: v })}>
+            <Select value={p.method} onValueChange={(v) => setPayment(i, { method: v as PaymentMethod })}>
               <SelectTrigger aria-label="Payment method" className="h-8 w-32"><SelectValue /></SelectTrigger>
               <SelectContent>
                 {METHODS.map((m) => <SelectItem key={m} value={m}>{m}</SelectItem>)}
               </SelectContent>
             </Select>
-            <Input type="number" value={p.amount} onChange={(e) => setPayment(i, { amount: Number(e.target.value) })} placeholder="Amount" aria-label="Payment amount" className="h-8 w-28" />
-            <Input value={p.reference} onChange={(e) => setPayment(i, { reference: e.target.value })} placeholder="Ref (optional)" aria-label="Payment reference" className="h-8" />
+            <Input
+              type="number"
+              value={p.amount}
+              onChange={(e) => setPayment(i, { amount: Number(e.target.value) })}
+              placeholder="Amount"
+              aria-label="Payment amount"
+              aria-invalid={overpay > 0 || undefined}
+              className={`h-8 w-28 ${overpay > 0 ? "border-destructive" : ""}`}
+            />
+            <Input value={p.reference ?? ""} onChange={(e) => setPayment(i, { reference: e.target.value })} placeholder="Ref (optional)" aria-label="Payment reference" className="h-8" />
             {payments.length > 1 && <Button type="button" size="sm" variant="ghost" aria-label="Remove payment row" onClick={() => setPayments((ps) => ps.filter((_, idx) => idx !== i))}>✕</Button>}
           </div>
         ))}
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <Button type="button" size="sm" variant="outline" onClick={() => setPayments((ps) => [...ps, { method: "CASH", amount: 0, reference: "" }])}>+ Payment</Button>
-          <Button type="button" size="sm" variant="ghost" onClick={() => setPayment(0, { amount: totals.grandTotal })}>Exact cash</Button>
-          <span className={`text-sm ${balance > 0 ? "text-amber-600" : "text-green-600"}`}>
-            {balance > 0 ? `Balance ${formatNPR(balance)} (→ credit)` : balance < 0 ? `Change ${formatNPR(-balance)}` : "Settled"}
+          <Button type="button" size="sm" variant="ghost" onClick={fillExactCash}>Exact cash</Button>
+          {overpay > 0 && (
+            <Button type="button" size="sm" variant="outline" onClick={trimToExact}>
+              Trim to exact
+            </Button>
+          )}
+          <span
+            aria-live="polite"
+            className={`text-sm ${
+              overpay > 0 ? "font-semibold text-destructive" : balance > 0 ? "text-amber-700" : "text-green-700"
+            }`}
+          >
+            {overpay > 0
+              ? `Overpayment of ${formatNPR(overpay)} is not allowed`
+              : balance > 0
+              ? `Balance ${formatNPR(balance)} (→ credit)`
+              : "Settled"}
           </span>
         </div>
       </div>
 
-      {balance > 0 && (
+      {balance > 0 && !overpay && (
         <div className="flex items-end gap-2 rounded border border-amber-300 bg-amber-50 p-2">
           <label className="text-xs">Customer name (credit)
             <Input name="customerName" className="h-8" placeholder="Required for unpaid balance" />
@@ -110,7 +159,7 @@ export function BillSettle({
 
       {error && <p className="text-sm text-destructive" role="alert">{error}</p>}
 
-      <Button type="submit" className="w-full" disabled={pending}>
+      <Button type="submit" className="w-full" disabled={pending || overpay > 0}>
         {pending ? "Finalizing…" : "Finalize & generate invoice"}
       </Button>
     </form>

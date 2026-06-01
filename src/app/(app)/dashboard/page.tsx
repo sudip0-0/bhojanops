@@ -6,6 +6,7 @@ import { isLowStock } from "@/lib/stock";
 import { paymentMix, topItems, sum } from "@/lib/reports";
 import { formatNPR } from "@/lib/nepal";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Kpi } from "@/components/ui/kpi";
 import { PaymentMixChart, TopItemsChart } from "@/components/dashboard-charts";
 
 export default async function DashboardPage() {
@@ -37,7 +38,7 @@ export default async function DashboardPage() {
         <Kpi label="Bills Today" value={String(bills.length)} />
         <Kpi label="Open Orders" value={String(openOrders)} />
         <Kpi label="Avg Order Value" value={formatNPR(avg)} />
-        <Kpi label="Low Stock Items" value={String(lowCount)} accent={lowCount > 0} />
+        <Kpi label="Low Stock Items" value={String(lowCount)} tone={lowCount > 0 ? "danger" : "default"} />
       </div>
       <div className="grid gap-4 lg:grid-cols-2">
         <Card>
@@ -53,13 +54,3 @@ export default async function DashboardPage() {
   );
 }
 
-function Kpi({ label, value, accent }: { label: string; value: string; accent?: boolean }) {
-  return (
-    <Card className={accent ? "border-destructive" : ""}>
-      <CardContent className="pt-4">
-        <p className="text-xs text-muted-foreground">{label}</p>
-        <p className={`text-xl font-bold ${accent ? "text-destructive" : ""}`}>{value}</p>
-      </CardContent>
-    </Card>
-  );
-}

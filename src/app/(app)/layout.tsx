@@ -1,7 +1,9 @@
+import { Suspense } from "react";
 import { requirePermission } from "@/lib/auth-helpers";
 import { filterNav } from "@/lib/nav";
 import { Sidebar } from "@/components/app-shell/sidebar";
 import { Toaster } from "@/components/ui/toaster";
+import { ToastReader } from "@/components/ui/toast-reader";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const user = await requirePermission();
@@ -14,6 +16,9 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       <Sidebar items={items} user={{ name: user.name, role: user.role }} />
       <main id="main-content" className="flex-1 overflow-y-auto bg-background p-4 md:p-6">{children}</main>
       <Toaster />
+      <Suspense>
+        <ToastReader />
+      </Suspense>
     </div>
   );
 }

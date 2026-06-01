@@ -4,17 +4,41 @@ import { prisma } from "@/lib/prisma";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 
-export default async function AuditPage({ searchParams }: { searchParams: Promise<{ action?: string; userId?: string; from?: string; to?: string; page?: string }> }) {
+const KNOWN_ACTIONS = [
+  "all",
+  "order.create",
+  "order.send",
+  "bill.finalize",
+  "bill.refund",
+  "bill.refund.partial",
+  "discount.apply",
+  "kds.advance",
+  "shift.open",
+  "shift.close",
+  "void.request",
+  "void.approve",
+  "void.reject",
+  "menu.update",
+  "user.create",
+  "user.toggle",
+  "settings.update",
+  "branch.create",
+];
+
+export default async function AuditPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ action?: string; userId?: string; from?: string; to?: string; page?: string }>;
+}) {
   const user = await requirePermission("audit.view");
   const sp = await searchParams;
   const PAGE_SIZE = 50;
   const page = Math.max(1, Number(sp.page) || 1);
 
   const where: Record<string, unknown> = {};
-  if (sp.action) where.action = { contains: sp.action, mode: "insensitive" };
+  if (sp.action && sp.action !== "all") where.action = { contains: sp.action, mode: "insensitive" };
   if (sp.userId && sp.userId !== "all") where.userId = sp.userId;
   if (sp.from || sp.to) {
     where.createdAt = {
@@ -22,10 +46,16 @@ export default async function AuditPage({ searchParams }: { searchParams: Promis
       ...(sp.to ? { lte: new Date(`${sp.to}T23:59:59`) } : {}),
     };
   }
-  if (user.branchId) where.branchId = user.branchId; // branch-scoped unless owner/auditor (null branch)
+  if (user.branchId) where.branchId = user.branchId;
 
   const [logs, users, total] = await Promise.all([
-    prisma.auditLog.findMany({ where, orderBy: { createdAt: "desc" }, take: PAGE_SIZE, skip: (page - 1) * PAGE_SIZE, include: { user: true } }),
+    prisma.auditLog.findMany({
+      where,
+      orderBy: { createdAt: "desc" },
+      take: PAGE_SIZE,
+      skip: (page - 1) * PAGE_SIZE,
+      include: { user: true },
+    }),
     prisma.user.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true } }),
     prisma.auditLog.count({ where }),
   ]);
@@ -40,23 +70,65 @@ export default async function AuditPage({ searchParams }: { searchParams: Promis
     return `?${u.toString()}`;
   };
 
+  const today = (() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  })();
+
   return (
     <div className="space-y-4">
       <h1 className="text-2xl font-bold">Audit Logs <span className="text-sm font-normal text-muted-foreground">(read-only)</span></h1>
       <form className="flex flex-wrap items-end gap-2">
-        <label className="text-xs">Action<Input name="action" defaultValue={sp.action} placeholder="e.g. bill.finalize" className="h-8 w-44" /></label>
-        <label className="text-xs">User
-          <Select name="userId" defaultValue={sp.userId || "all"}>
-            <SelectTrigger aria-label="Filter by user" className="ml-1 mt-1 h-8 w-44"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All</SelectItem>
-              {users.map((u) => <SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>)}
-            </SelectContent>
-          </Select>
+        <label className="flex flex-col gap-0.5 text-xs">
+          <span>Action</span>
+          <select
+            name="action"
+            defaultValue={sp.action || "all"}
+            className="h-8 w-48 rounded-md border bg-background px-2 text-sm"
+            aria-label="Filter by action"
+          >
+            {KNOWN_ACTIONS.map((a) => (
+              <option key={a} value={a}>
+                {a === "all" ? "All actions" : a}
+              </option>
+            ))}
+          </select>
         </label>
-        <label className="text-xs">From<Input type="date" name="from" defaultValue={sp.from} className="h-8" /></label>
-        <label className="text-xs">To<Input type="date" name="to" defaultValue={sp.to} className="h-8" /></label>
+        <label className="flex flex-col gap-0.5 text-xs">
+          <span>User</span>
+          <select
+            name="userId"
+            defaultValue={sp.userId || "all"}
+            className="h-8 w-44 rounded-md border bg-background px-2 text-sm"
+            aria-label="Filter by user"
+          >
+            <option value="all">All</option>
+            {users.map((u) => (
+              <option key={u.id} value={u.id}>{u.name}</option>
+            ))}
+          </select>
+        </label>
+        <label className="flex flex-col gap-0.5 text-xs">
+          <span>From</span>
+          <Input type="date" name="from" defaultValue={sp.from} className="h-8" />
+        </label>
+        <label className="flex flex-col gap-0.5 text-xs">
+          <span>To</span>
+          <Input type="date" name="to" defaultValue={sp.to} className="h-8" />
+        </label>
         <Button type="submit" size="sm" variant="outline">Filter</Button>
+        <Link
+          href={`/audit?from=${today}&to=${today}`}
+          className="rounded-full border bg-muted/40 px-3 py-1 text-xs hover:bg-muted"
+        >
+          Today
+        </Link>
+        <Link
+          href="/audit"
+          className="rounded-full border bg-muted/40 px-3 py-1 text-xs hover:bg-muted"
+        >
+          Clear
+        </Link>
       </form>
 
       <Card>

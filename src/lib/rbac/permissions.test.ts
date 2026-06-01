@@ -19,4 +19,7 @@ describe("permission catalog", () => {
   it("cashier cannot manage settings", () => {
     expect(ROLE_PERMISSIONS.cashier).not.toContain("settings.manage");
   });
+  it("manager can manage branches (P0-3)", () => {
+    expect(ROLE_PERMISSIONS.manager).toContain("branches.manage");
+  });
 });

@@ -5,7 +5,8 @@ import { paymentMix, topItems, sum } from "@/lib/reports";
 import { formatNPR } from "@/lib/nepal";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { Kpi } from "@/components/ui/kpi";
+import { DateRangePicker } from "@/components/ui/date-range-picker";
 
 export default async function ReportsPage({ searchParams }: { searchParams: Promise<{ from?: string; to?: string }> }) {
   const user = await requirePermission("reports.view");
@@ -46,15 +47,13 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
     <div className="space-y-6">
       <div className="flex flex-wrap items-end justify-between gap-2">
         <h1 className="text-2xl font-bold">Reports</h1>
-        <form className="flex items-end gap-2">
-          <label className="text-xs">From<Input type="date" name="from" defaultValue={fromStr} className="h-8" /></label>
-          <label className="text-xs">To<Input type="date" name="to" defaultValue={toStr} className="h-8" /></label>
-          <Button type="submit" size="sm" variant="outline">Apply</Button>
+        <div className="flex flex-wrap items-end gap-2">
+          <DateRangePicker from={fromStr} to={toStr} />
           {can(user.permissions, "reports.view") && (
             <Button asChild size="sm"><a href={`/api/reports/export?from=${fromStr}&to=${toStr}`}>Export CSV</a></Button>
           )}
           <Button asChild size="sm" variant="outline"><a href="/reports/z">Z report</a></Button>
-        </form>
+        </div>
       </div>
       {user.role === "cashier" && <p className="text-xs text-muted-foreground">Showing your own bills only.</p>}
 
@@ -92,6 +91,3 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
   );
 }
 
-function Kpi({ label, value }: { label: string; value: string }) {
-  return <Card><CardContent className="pt-4"><p className="text-xs text-muted-foreground">{label}</p><p className="text-lg font-bold">{value}</p></CardContent></Card>;
-}

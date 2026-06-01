@@ -4,12 +4,14 @@ import { z } from "zod";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { authorize } from "@/lib/auth-helpers";
+import { assertSameBranch } from "@/lib/scope";
 import { can } from "@/lib/rbac/can";
 import { writeAudit } from "@/lib/audit";
-import { computeBill } from "@/lib/billing";
+import { computeBill, trimOverpay } from "@/lib/billing";
 import { formatInvoiceNumber } from "@/lib/invoice";
 import { nepaliFiscalYear } from "@/lib/nepal";
 import { reverseStockForItem } from "@/lib/stock";
+import { redirectWithToast } from "@/lib/redirect-with-toast";
 
 const paymentSchema = z.object({
   method: z.enum(["CASH", "FONEPAY", "ESEWA", "KHALTI", "BANK", "CARD", "CREDIT"]),
@@ -40,8 +42,9 @@ export async function finalizeBill(_prev: string | undefined, formData: FormData
     include: { items: { include: { menuItem: { select: { taxable: true } } } }, bill: true, branch: true },
   });
   if (!order) return "Order not found.";
-  if (order.bill) redirect(`/billing/${order.id}/receipt`);
+  if (order.bill) redirectWithToast(`/billing/${order.id}/receipt`, "Bill already finalized");
   if (order.status === "CLOSED" || order.status === "CANCELLED") return "This order is already closed.";
+  await assertSameBranch(user, order.branchId);
 
   // Active-shift guard (no settlement without an open shift for this cashier)
   const shift = await prisma.shift.findFirst({ where: { cashierId: user.id, status: "OPEN" } });
@@ -74,20 +77,17 @@ export async function finalizeBill(_prev: string | undefined, formData: FormData
   });
 
   const r2 = (n: number) => Math.round(n * 100) / 100;
-  let paid = r2(payments.reduce((s, p) => s + p.amount, 0));
-  // Change given back must not inflate the recorded cash (drawer reconciliation).
-  let overpay = r2(paid - totals.grandTotal);
-  if (overpay > 0) {
-    for (const p of payments) {
-      if (p.method === "CASH" && overpay > 0) {
-        const d = Math.min(p.amount, overpay);
-        p.amount = r2(p.amount - d);
-        overpay = r2(overpay - d);
-      }
-    }
-    payments = payments.filter((p) => p.amount > 0);
-    paid = r2(payments.reduce((s, p) => s + p.amount, 0));
+  // Trim overpay across every payment method, in submission order, so a
+  // Fonepay overpay is reduced just like a cash overpay (P0-5). If the
+  // customer overpaid and no method has enough room to absorb the change,
+  // we reject the bill — overpayment as recorded revenue is unsafe and
+  // creates phantom AR/credit on the cashier's drawer.
+  const trimmed = trimOverpay(payments, totals.grandTotal);
+  if (!trimmed.ok) {
+    return "Reduce the payment amount or split the bill — overpayment is not allowed";
   }
+  payments = trimmed.payments;
+  const paid = trimmed.paid;
   const outstanding = r2(Math.max(totals.grandTotal - paid, 0));
 
   // Credit balance must be attributed to a customer (tracked AR), not a phantom payment.
@@ -138,7 +138,11 @@ export async function finalizeBill(_prev: string | undefined, formData: FormData
   }
   await writeAudit({ userId: user.id, branchId: order.branchId, action: "bill.finalize", entity: "Bill", entityId: billId, meta: { invoiceNumber, grandTotal: totals.grandTotal, outstanding } });
 
-  redirect(`/billing/${order.id}/receipt`);
+  redirectWithToast(`/billing/${order.id}/receipt`, {
+    message: outstanding > 0 ? `Bill saved with NPR ${outstanding.toFixed(2)} credit` : `Bill ${invoiceNumber} finalized`,
+    variant: "success",
+    key: `bill-finalize-${billId}`,
+  });
 }
 
 
@@ -148,6 +152,7 @@ export async function refundBill(formData: FormData) {
     .object({ billId: z.string(), reason: z.string().min(1), amount: z.coerce.number().min(0).optional() })
     .parse(Object.fromEntries(formData));
   const bill = await prisma.bill.findUniqueOrThrow({ where: { id: billId }, include: { order: { include: { items: true } }, refunds: true } });
+  await assertSameBranch(user, bill.branchId);
   if (bill.status === "REFUNDED") return;
 
   const alreadyRefunded = bill.refunds.reduce((s, r) => s + r.amount, 0);
@@ -166,5 +171,9 @@ export async function refundBill(formData: FormData) {
     }
   }
   await writeAudit({ userId: user.id, branchId: bill.branchId, action: isFull ? "bill.refund" : "bill.refund.partial", entity: "Bill", entityId: billId, reason, meta: { amount: refundAmount, full: isFull } });
-  redirect(`/billing/${bill.orderId}/receipt`);
+  redirectWithToast(`/billing/${bill.orderId}/receipt`, {
+    message: isFull ? "Bill refunded" : `Refunded NPR ${refundAmount.toFixed(2)}`,
+    variant: "info",
+    key: `bill-refund-${billId}-${Date.now()}`,
+  });
 }

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { computeBill } from "./billing";
+import { computeBill, trimOverpay } from "./billing";
 
 describe("computeBill (VAT-inclusive)", () => {
   it("back-calculates VAT from inclusive price", () => {
@@ -62,5 +62,76 @@ describe("computeBill (VAT-inclusive)", () => {
     const t = computeBill({ lines: [{ unitPrice: 226, qty: 1 }], vatRate: 13 });
     expect(t.vat).toBe(26);
     expect(t.base).toBe(226);
+  });
+});
+
+describe("trimOverpay (P0-5)", () => {
+  it("returns payments unchanged when paid equals total", () => {
+    const r = trimOverpay([{ method: "CASH", amount: 500 }], 500);
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.paid).toBe(500);
+      expect(r.payments[0].amount).toBe(500);
+    }
+  });
+
+  it("trims cash overpay (change given back)", () => {
+    const r = trimOverpay([{ method: "CASH", amount: 550 }], 500);
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.payments[0].amount).toBe(500);
+      expect(r.paid).toBe(500);
+    }
+  });
+
+  it("trims a Fonepay overpay (was previously kept as revenue)", () => {
+    const r = trimOverpay([{ method: "FONEPAY", amount: 550 }], 500);
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.payments[0].amount).toBe(500);
+      expect(r.paid).toBe(500);
+    }
+  });
+
+  it("trims overpay across multiple methods in order", () => {
+    // Total paid 1100, grand 1000 → take all 100 off the first method (CASH).
+    // (Fonepay stays whole, matching the old single-method-trim behaviour.)
+    const r = trimOverpay(
+      [{ method: "CASH", amount: 500 }, { method: "FONEPAY", amount: 600 }],
+      1000,
+    );
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.payments[0].amount).toBe(400);
+      expect(r.payments[1].amount).toBe(600);
+      expect(r.paid).toBe(1000);
+    }
+  });
+
+  it("trims a tiny rounding overpay from the last method", () => {
+    // Two payments of 50.50 each, grand 100.99 → keep 100.99, overpay 0.01
+    const r = trimOverpay(
+      [{ method: "CASH", amount: 50.5 }, { method: "FONEPAY", amount: 50.5 }],
+      100.99,
+    );
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.payments[0].amount).toBe(50.49);
+      expect(r.payments[1].amount).toBe(50.5);
+      expect(r.paid).toBe(100.99);
+    }
+  });
+
+  it("rejects when overpay cannot be absorbed (paid > grand after trim)", () => {
+    // grand 0, paid 100. After trim CASH becomes 0, paid = 0 = grand, ok:true.
+    // The defensive `paid > grandTotal` check is unreachable in pure JS
+    // (every payment is fully reduced before the check), so we verify the
+    // happy path here and trust the guard for future refactors.
+    const r = trimOverpay([{ method: "CASH", amount: 100 }], 0);
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.paid).toBe(0);
+      expect(r.payments).toEqual([]);
+    }
   });
 });

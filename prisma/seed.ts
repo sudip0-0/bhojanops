@@ -19,6 +19,7 @@ async function clear() {
     prisma.refund.deleteMany(),
     prisma.billItemSnapshot.deleteMany(),
     prisma.voidRequest.deleteMany(),
+    prisma.passwordResetToken.deleteMany(),
     prisma.stockMovement.deleteMany(),
     prisma.purchaseItem.deleteMany(),
     prisma.purchase.deleteMany(),
@@ -37,6 +38,7 @@ async function clear() {
   await prisma.stockItem.deleteMany();
   await prisma.supplier.deleteMany();
   await prisma.invoiceSequence.deleteMany();
+  await prisma.orderSequence.deleteMany();
   await prisma.table.deleteMany();
   await prisma.floor.deleteMany();
   await prisma.user.deleteMany();

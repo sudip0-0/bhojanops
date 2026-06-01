@@ -3,8 +3,8 @@ import { prisma } from "@/lib/prisma";
 import { paymentMix, sum } from "@/lib/reports";
 import { formatNPR } from "@/lib/nepal";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { Kpi } from "@/components/ui/kpi";
+import { DatePicker } from "@/components/ui/date-range-picker";
 
 export default async function ZReportPage({ searchParams }: { searchParams: Promise<{ date?: string }> }) {
   const user = await requirePermission("reports.view");
@@ -40,10 +40,7 @@ export default async function ZReportPage({ searchParams }: { searchParams: Prom
     <div className="space-y-6">
       <div className="flex flex-wrap items-end justify-between gap-2">
         <h1 className="text-2xl font-bold">Z Report (day-end)</h1>
-        <form className="flex items-end gap-2">
-          <label className="text-xs">Date<Input type="date" name="date" defaultValue={dayStr} className="h-8" /></label>
-          <Button type="submit" size="sm" variant="outline">Apply</Button>
-        </form>
+        <DatePicker value={dayStr} />
       </div>
 
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-6">
@@ -88,6 +85,3 @@ export default async function ZReportPage({ searchParams }: { searchParams: Prom
   );
 }
 
-function Kpi({ label, value }: { label: string; value: string }) {
-  return <Card><CardContent className="pt-4"><p className="text-xs text-muted-foreground">{label}</p><p className="text-lg font-bold">{value}</p></CardContent></Card>;
-}

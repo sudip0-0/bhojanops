@@ -44,6 +44,7 @@ export const ROLE_PERMISSIONS: Record<string, string[]> = {
     "bill.refund", "kds.view", "kds.update", "stock.manage", "purchase.manage",
     "wastage.record", "shift.open", "shift.close", "shift.approve",
     "reports.view", "audit.view", "data.export", "users.manage",
+    "branches.manage",
   ],
   cashier: [
     "order.create", "bill.create", "bill.finalize", "payment.settle",
