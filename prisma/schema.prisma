@@ -1,0 +1,493 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------- Enums ----------
+enum OrderType {
+  DINE_IN
+  TAKEAWAY
+  DELIVERY
+}
+
+enum OrderStatus {
+  DRAFT
+  OPEN
+  BILLED
+  CLOSED
+  CANCELLED
+}
+
+enum OrderItemState {
+  DRAFT
+  SENT
+  PREPARING
+  READY
+  SERVED
+  VOIDED
+}
+
+enum TableState {
+  AVAILABLE
+  OCCUPIED
+  ORDERED
+  BILL_REQUESTED
+  CLEANING
+  DISABLED
+}
+
+enum TicketState {
+  NEW
+  PREPARING
+  READY
+  SERVED
+}
+
+enum PaymentMethod {
+  CASH
+  FONEPAY
+  ESEWA
+  KHALTI
+  BANK
+  CARD
+  CREDIT
+}
+
+enum BillStatus {
+  FINALIZED
+  REFUNDED
+  PARTIALLY_REFUNDED
+}
+
+enum ReceiptMode {
+  TAX
+  NON_TAX
+}
+
+enum DiscountType {
+  PERCENT
+  AMOUNT
+}
+
+enum StockMovementType {
+  PURCHASE
+  SALE
+  WASTAGE
+  ADJUSTMENT
+  RETURN
+  REVERSAL
+}
+
+enum VoidStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum ShiftStatus {
+  OPEN
+  CLOSED
+}
+
+// ---------- Auth / RBAC ----------
+model Role {
+  id          String           @id @default(cuid())
+  key         String           @unique // owner, manager, cashier, waiter, kitchen, inventory, auditor
+  name        String
+  permissions RolePermission[]
+  users       User[]
+}
+
+model Permission {
+  id    String           @id @default(cuid())
+  key   String           @unique // e.g. "bill.finalize"
+  name  String
+  roles RolePermission[]
+}
+
+model RolePermission {
+  roleId       String
+  permissionId String
+  role         Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+}
+
+model User {
+  id           String      @id @default(cuid())
+  email        String      @unique
+  name         String
+  passwordHash String
+  active       Boolean     @default(true)
+  roleId       String
+  role         Role        @relation(fields: [roleId], references: [id])
+  branchId     String?
+  branch       Branch?     @relation(fields: [branchId], references: [id])
+  orders       Order[]
+  bills        Bill[]
+  shifts       Shift[]
+  auditLogs    AuditLog[]
+  createdAt    DateTime    @default(now())
+}
+
+// ---------- Restaurant setup ----------
+model Restaurant {
+  id            String      @id @default(cuid())
+  legalName     String
+  displayName   String
+  address       String
+  phone         String
+  panVat        String
+  logoUrl       String?
+  vatRate       Float       @default(13)
+  serviceCharge Float       @default(0)
+  packaging     Float       @default(0)
+  maxDiscountPct Float      @default(100) // discounts above this need discount.approve
+  receiptFooter String      @default("Thank you! Please visit again.")
+  receiptMode   ReceiptMode @default(TAX)
+  branches      Branch[]
+}
+
+model Branch {
+  id            String       @id @default(cuid())
+  restaurantId  String
+  restaurant    Restaurant   @relation(fields: [restaurantId], references: [id])
+  name          String
+  address       String
+  phone         String
+  invoicePrefix String
+  users         User[]
+  floors        Floor[]
+  tables        Table[]
+  orders        Order[]
+  bills         Bill[]
+  shifts        Shift[]
+  invoiceSeqs   InvoiceSequence[]
+  stockItems    StockItem[]
+  purchases     Purchase[]
+}
+
+model Floor {
+  id       String  @id @default(cuid())
+  branchId String
+  branch   Branch  @relation(fields: [branchId], references: [id])
+  name     String
+  tables   Table[]
+}
+
+model Table {
+  id       String     @id @default(cuid())
+  branchId String
+  branch   Branch     @relation(fields: [branchId], references: [id])
+  floorId  String
+  floor    Floor      @relation(fields: [floorId], references: [id])
+  name     String
+  seats    Int        @default(4)
+  state    TableState @default(AVAILABLE)
+  orders   Order[]
+}
+
+model InvoiceSequence {
+  id         String @id @default(cuid())
+  branchId   String
+  branch     Branch @relation(fields: [branchId], references: [id])
+  fiscalYear String // e.g. "2081-82"
+  lastNumber Int    @default(0)
+
+  @@unique([branchId, fiscalYear])
+}
+
+// ---------- Menu ----------
+model MenuCategory {
+  id     String     @id @default(cuid())
+  name   String
+  sort   Int        @default(0)
+  items  MenuItem[]
+}
+
+model MenuItem {
+  id          String        @id @default(cuid())
+  categoryId  String
+  category    MenuCategory  @relation(fields: [categoryId], references: [id])
+  name        String
+  nepaliName  String?
+  description String?
+  price       Float // VAT-inclusive
+  imageUrl    String?
+  taxable     Boolean       @default(true)
+  available   Boolean       @default(true)
+  archived    Boolean       @default(false)
+  station     String        @default("kitchen")
+  variants    MenuVariant[]
+  modifiers   ModifierGroup[]
+  recipe      RecipeItem[]
+  orderItems  OrderItem[]
+}
+
+model MenuVariant {
+  id          String      @id @default(cuid())
+  menuItemId  String
+  menuItem    MenuItem    @relation(fields: [menuItemId], references: [id], onDelete: Cascade)
+  name        String // Half / Full / Small ...
+  priceDelta  Float       @default(0)
+  orderItems  OrderItem[]
+}
+
+model ModifierGroup {
+  id         String     @id @default(cuid())
+  menuItemId String
+  menuItem   MenuItem   @relation(fields: [menuItemId], references: [id], onDelete: Cascade)
+  name       String
+  modifiers  Modifier[]
+}
+
+model Modifier {
+  id      String        @id @default(cuid())
+  groupId String
+  group   ModifierGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  name    String
+  price   Float         @default(0)
+}
+
+// ---------- Orders ----------
+model Order {
+  id         String      @id @default(cuid())
+  branchId   String
+  branch     Branch      @relation(fields: [branchId], references: [id])
+  number     Int
+  type       OrderType   @default(DINE_IN)
+  status     OrderStatus @default(DRAFT)
+  tableId    String?
+  table      Table?      @relation(fields: [tableId], references: [id])
+  waiterId   String?
+  waiter     User?       @relation(fields: [waiterId], references: [id])
+  guests     Int         @default(1)
+  items      OrderItem[]
+  tickets    KitchenTicket[]
+  bill       Bill?
+  createdAt  DateTime    @default(now())
+}
+
+model OrderItem {
+  id          String         @id @default(cuid())
+  orderId     String
+  order       Order          @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  menuItemId  String
+  menuItem    MenuItem       @relation(fields: [menuItemId], references: [id])
+  variantId   String?
+  variant     MenuVariant?   @relation(fields: [variantId], references: [id])
+  nameSnapshot String
+  unitPrice   Float
+  qty         Int            @default(1)
+  notes       String?
+  modifiers   Json? // [{name, price}]
+  state       OrderItemState @default(DRAFT)
+  station     String         @default("kitchen")
+  stockDeducted Boolean      @default(false)
+  ticketId    String?
+  ticket      KitchenTicket? @relation(fields: [ticketId], references: [id])
+  voidRequests VoidRequest[]
+  servedAt    DateTime?
+  createdAt   DateTime       @default(now())
+}
+
+model KitchenTicket {
+  id        String      @id @default(cuid())
+  orderId   String
+  order     Order       @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  station   String
+  state     TicketState @default(NEW)
+  items     OrderItem[]
+  createdAt DateTime    @default(now())
+}
+
+// ---------- Billing ----------
+model Bill {
+  id            String              @id @default(cuid())
+  branchId      String
+  branch        Branch              @relation(fields: [branchId], references: [id])
+  orderId       String              @unique
+  order         Order               @relation(fields: [orderId], references: [id])
+  invoiceNumber String              @unique
+  cashierId     String
+  cashier       User                @relation(fields: [cashierId], references: [id])
+  shiftId       String?
+  shift         Shift?              @relation(fields: [shiftId], references: [id])
+  subtotal      Float
+  discountType  DiscountType?
+  discountValue Float               @default(0)
+  discountAmt   Float               @default(0)
+  serviceCharge Float               @default(0)
+  packaging     Float               @default(0)
+  vatAmount     Float               @default(0)
+  netAmount     Float               @default(0)
+  roundOff      Float               @default(0)
+  grandTotal    Float
+  outstanding   Float               @default(0) // unpaid credit balance (house account / AR)
+  customerId    String?
+  customer      Customer?           @relation(fields: [customerId], references: [id])
+  status        BillStatus          @default(FINALIZED)
+  receiptMode   ReceiptMode         @default(TAX)
+  items         BillItemSnapshot[]
+  payments      Payment[]
+  refunds       Refund[]
+  createdAt     DateTime            @default(now())
+}
+
+model BillItemSnapshot {
+  id        String @id @default(cuid())
+  billId    String
+  bill      Bill   @relation(fields: [billId], references: [id], onDelete: Cascade)
+  name      String
+  qty       Int
+  unitPrice Float
+  lineTotal Float
+}
+
+model Payment {
+  id       String        @id @default(cuid())
+  billId   String
+  bill     Bill          @relation(fields: [billId], references: [id], onDelete: Cascade)
+  method   PaymentMethod
+  amount   Float
+  reference String?
+  createdAt DateTime     @default(now())
+}
+
+model Refund {
+  id        String   @id @default(cuid())
+  billId    String
+  bill      Bill     @relation(fields: [billId], references: [id])
+  amount    Float
+  reason    String
+  approvedById String?
+  createdAt DateTime @default(now())
+}
+
+// ---------- Customers / credit (AR) ----------
+model Customer {
+  id        String   @id @default(cuid())
+  name      String
+  phone     String?
+  bills     Bill[]
+  createdAt DateTime @default(now())
+}
+
+// ---------- Void requests ----------
+model VoidRequest {
+  id          String     @id @default(cuid())
+  orderItemId String
+  orderItem   OrderItem  @relation(fields: [orderItemId], references: [id])
+  requestedById String
+  reason      String
+  status      VoidStatus @default(PENDING)
+  decidedById String?
+  createdAt   DateTime   @default(now())
+}
+
+// ---------- Inventory ----------
+model StockItem {
+  id          String          @id @default(cuid())
+  branchId    String
+  branch      Branch          @relation(fields: [branchId], references: [id])
+  name        String
+  unit        String // kg, pcs, ltr
+  quantity    Float           @default(0)
+  reorderLevel Float          @default(0)
+  cost        Float           @default(0)
+  recipes     RecipeItem[]
+  movements   StockMovement[]
+  purchases   PurchaseItem[]
+}
+
+model RecipeItem {
+  id          String    @id @default(cuid())
+  menuItemId  String
+  menuItem    MenuItem  @relation(fields: [menuItemId], references: [id], onDelete: Cascade)
+  stockItemId String
+  stockItem   StockItem @relation(fields: [stockItemId], references: [id])
+  qtyPerUnit  Float
+
+  @@unique([menuItemId, stockItemId])
+}
+
+model StockMovement {
+  id          String            @id @default(cuid())
+  stockItemId String
+  stockItem   StockItem         @relation(fields: [stockItemId], references: [id])
+  type        StockMovementType
+  qty         Float // signed: negative reduces stock
+  note        String?
+  refId       String? // order item id, purchase id, etc.
+  createdAt   DateTime          @default(now())
+}
+
+model Supplier {
+  id        String     @id @default(cuid())
+  name      String
+  phone     String?
+  purchases Purchase[]
+}
+
+model Purchase {
+  id         String         @id @default(cuid())
+  branchId   String
+  branch     Branch         @relation(fields: [branchId], references: [id])
+  supplierId String?
+  supplier   Supplier?      @relation(fields: [supplierId], references: [id])
+  total      Float          @default(0)
+  items      PurchaseItem[]
+  createdAt  DateTime       @default(now())
+}
+
+model PurchaseItem {
+  id          String    @id @default(cuid())
+  purchaseId  String
+  purchase    Purchase  @relation(fields: [purchaseId], references: [id], onDelete: Cascade)
+  stockItemId String
+  stockItem   StockItem @relation(fields: [stockItemId], references: [id])
+  qty         Float
+  cost        Float
+}
+
+// ---------- Shifts ----------
+model Shift {
+  id          String      @id @default(cuid())
+  branchId    String
+  branch      Branch      @relation(fields: [branchId], references: [id])
+  cashierId   String
+  cashier     User        @relation(fields: [cashierId], references: [id])
+  openingCash Float       @default(0)
+  countedCash Float?
+  expectedCash Float?
+  variance    Float?
+  varianceReason String?
+  status      ShiftStatus @default(OPEN)
+  bills       Bill[]
+  openedAt    DateTime    @default(now())
+  closedAt    DateTime?
+}
+
+// ---------- Audit ----------
+model AuditLog {
+  id        String   @id @default(cuid())
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id])
+  branchId  String?
+  action    String
+  entity    String?
+  entityId  String?
+  reason    String?
+  meta      Json?
+  createdAt DateTime @default(now())
+}
+
+model AppSetting {
+  key   String @id
+  value String
+}

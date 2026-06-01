@@ -1,0 +1,14 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: bhojanops-db
+    environment:
+      POSTGRES_USER: bhojan
+      POSTGRES_PASSWORD: bhojan
+      POSTGRES_DB: bhojanops
+    ports:
+      - "5434:5432"
+    volumes:
+      - bhojanops-pgdata:/var/lib/postgresql/data
+volumes:
+  bhojanops-pgdata:
